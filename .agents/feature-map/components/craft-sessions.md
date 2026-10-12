@@ -607,7 +607,7 @@ Reclaimed runners do not infer attribution from a replacement baseline.
 
 One indexed path appears beneath its latest producing turn. App source changes become one `outputs/web` card.
 File cards link to current sandbox files; they do not preserve historical file contents.
-Deleted files retain their index rows. Unchanged files keep their previous producing turn.
+Deleted files retain disabled chat cards. Unchanged files stay under their previous turn.
 Filesystem metadata detects writes; it does not prove that the bytes differ.
 
 `GET /build/sessions/{id}/output-cards` reads owned, indexed cards without waking the sandbox.
