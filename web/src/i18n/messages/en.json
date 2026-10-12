@@ -12581,6 +12581,9 @@
       "preparing": {
         "description": "Setting up your development environment",
         "title": "Preparing sandbox..."
+      },
+      "download": {
+        "label": "Download"
       }
     },
     "imagePreview": {
@@ -12753,6 +12756,28 @@
       }
     },
     "pdfPreview": {
+      "controls": {
+        "label": "PDF controls"
+      },
+      "thumbnails": {
+        "toggle": "Toggle page thumbnails",
+        "resize": "Resize page thumbnails",
+        "label": "Page thumbnails"
+      },
+      "page": {
+        "previous": "Previous page",
+        "next": "Next page",
+        "counter": "{current} / {total}",
+        "preview": "Page {page} preview",
+        "select": "Go to page {page}"
+      },
+      "zoom": {
+        "out": "Zoom out",
+        "in": "Zoom in",
+        "label": "Zoom",
+        "fitWidth": "Fit width",
+        "fitPage": "Fit page"
+      },
       "error": {
         "description": "The PDF file could not be loaded.",
         "title": "Cannot preview PDF"
@@ -12765,6 +12790,15 @@
       }
     },
     "pptxPreview": {
+      "controls": {
+        "label": "Presentation controls"
+      },
+      "thumbnails": {
+        "toggle": "Toggle slide thumbnails"
+      },
+      "resize": {
+        "ariaLabel": "Resize slide thumbnails"
+      },
       "slides": {
         "label": "Slides"
       },
@@ -12775,7 +12809,7 @@
         "label": "Next slide"
       },
       "converting": {
-        "label": "Converting presentation..."
+        "label": "Preparing preview..."
       },
       "empty": {
         "label": "No slides in this presentation"
@@ -12788,9 +12822,6 @@
       },
       "slide": {
         "counter": "Slide {current} of {total}"
-      },
-      "resize": {
-        "ariaLabel": "Resize slide thumbnails"
       }
     },
     "previewTab": {
