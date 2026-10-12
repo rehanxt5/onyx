@@ -13498,6 +13498,7 @@
         "placeholder": "Search outputs"
       },
       "scope": {
+        "turn": "Turn {turn, number} outputs",
         "all": "All outputs"
       },
       "unseen": "New or updated"
