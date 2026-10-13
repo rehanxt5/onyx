@@ -24,6 +24,8 @@ class VertexAIPromptCacheProvider(PromptCacheProvider):
         suffix: list[ChatCompletionMessage],
         continuation: bool,
         cache_metadata: CacheMetadata | None,  # noqa: ARG002
+        boundary_indices: Sequence[int] = (),  # noqa: ARG002
+        mark_tail: bool = True,  # noqa: ARG002
     ) -> list[ChatCompletionMessage]:
         """Prepare messages for Vertex AI caching.
 

@@ -176,3 +176,90 @@ def test_anthropic_single_message_prefix_marks_one_breakpoint() -> None:
 
     assert processed[0].cache_control == {"type": "ephemeral"}
     assert processed[1].cache_control is None
+
+
+def test_anthropic_marks_history_boundary_breakpoint() -> None:
+    prefix: list[ChatCompletionMessage] = [
+        SystemMessage(content="system prompt"),
+        UserMessage(content="earlier turn"),
+        UserMessage(content="last kept history"),
+        UserMessage(content="current question"),
+        UserMessage(content="tool round"),
+    ]
+
+    with patch.object(processor_module, "ENABLE_PROMPT_CACHING", True):
+        processed, _ = process_with_prompt_cache(
+            llm_config=_config("anthropic", "claude-sonnet-5"),
+            cacheable_prefix=prefix,
+            suffix=[UserMessage(content="reminder")],
+            continuation=False,
+            with_metadata=False,
+            boundary_indices=[2],
+        )
+
+    marked: list[int] = [
+        idx for idx, msg in enumerate(processed) if msg.cache_control is not None
+    ]
+    assert marked == [0, 2, 4]
+
+
+def test_anthropic_skips_tail_breakpoint_for_one_shot_prompt() -> None:
+    prefix: list[ChatCompletionMessage] = [
+        SystemMessage(content="system prompt"),
+        UserMessage(content="only question"),
+    ]
+
+    with patch.object(processor_module, "ENABLE_PROMPT_CACHING", True):
+        processed, _ = process_with_prompt_cache(
+            llm_config=_config("anthropic", "claude-sonnet-5"),
+            cacheable_prefix=prefix,
+            suffix=[UserMessage(content="reminder")],
+            continuation=False,
+            with_metadata=False,
+            mark_tail=False,
+        )
+
+    assert processed[0].cache_control == {"type": "ephemeral"}
+    assert processed[1].cache_control is None
+    assert processed[2].cache_control is None
+
+
+def test_anthropic_caps_breakpoints_at_four_in_prefix_order() -> None:
+    prefix: list[ChatCompletionMessage] = [
+        UserMessage(content=str(i)) for i in range(8)
+    ]
+
+    with patch.object(processor_module, "ENABLE_PROMPT_CACHING", True):
+        processed, _ = process_with_prompt_cache(
+            llm_config=_config("anthropic", "claude-sonnet-5"),
+            cacheable_prefix=prefix,
+            suffix=[],
+            continuation=False,
+            with_metadata=False,
+            boundary_indices=[2, 4, 6, 99],
+        )
+
+    marked: list[int] = [
+        idx for idx, msg in enumerate(processed) if msg.cache_control is not None
+    ]
+    assert marked == [0, 2, 4, 6]
+
+
+def test_non_anthropic_adapters_ignore_breakpoint_hints() -> None:
+    prefix: list[ChatCompletionMessage] = [
+        SystemMessage(content="system prompt"),
+        UserMessage(content="question"),
+    ]
+
+    with patch.object(processor_module, "ENABLE_PROMPT_CACHING", True):
+        processed, _ = process_with_prompt_cache(
+            llm_config=_config("openai", "gpt-5"),
+            cacheable_prefix=prefix,
+            suffix=[],
+            continuation=False,
+            with_metadata=False,
+            boundary_indices=[0],
+            mark_tail=False,
+        )
+
+    assert all(msg.cache_control is None for msg in processed)

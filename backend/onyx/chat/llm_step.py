@@ -597,11 +597,15 @@ def translate_history_to_llm_format(
     llm_config: LLMConfig,
     *,
     image_replay: HistoryImageReplay | None = None,
+    offers_tools: bool = True,
 ) -> list[ChatCompletionMessage]:
     """Convert a list of ChatMessageSimple to list[ChatCompletionMessage] format.
 
     Converts ChatMessageSimple messages to ChatCompletionMessage format,
     handling different message types and image files for multimodal support.
+
+    ``offers_tools`` is whether this step can call tools: a first-turn step
+    with no tools is a one-shot prompt, so its tail is not cache-marked.
     """
     messages: list[ChatCompletionMessage] = []
     history_message_formatter = _get_history_message_formatter(llm_config)
@@ -609,6 +613,11 @@ def translate_history_to_llm_format(
     # Some providers flatten tool history into plain assistant/user text, so this split
     # may be less semantically meaningful, but it remains safe and order-preserving.
     last_cacheable_msg_idx = _cacheable_history_prefix_length(history) - 1
+    boundary_indices: list[int] = [
+        idx
+        for idx, msg in enumerate(history[: last_cacheable_msg_idx + 1])
+        if msg.cache_boundary
+    ]
 
     # History can contain images even when the current model cannot accept
     # them (e.g. the user switched models mid-session). Sending them yields a
@@ -770,6 +779,8 @@ def translate_history_to_llm_format(
             cacheable_prefix=messages[: last_cacheable_msg_idx + 1],
             suffix=messages[last_cacheable_msg_idx + 1 :],
             continuation=False,
+            boundary_indices=boundary_indices,
+            mark_tail=offers_tools or bool(boundary_indices),
         )
         assert isinstance(processed_messages, list)  # for type-checking
         messages = processed_messages
@@ -881,7 +892,10 @@ def run_llm_step_pkt_generator(
         history, llm.config
     )
     llm_msg_history = translate_history_to_llm_format(
-        history, llm.config, image_replay=image_replay
+        history,
+        llm.config,
+        image_replay=image_replay,
+        offers_tools=bool(tool_definitions) and tool_choice != ToolChoiceOptions.NONE,
     )
     has_reasoned = False
 

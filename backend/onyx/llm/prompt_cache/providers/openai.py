@@ -1,5 +1,7 @@
 """OpenAI provider adapter for prompt caching."""
 
+from collections.abc import Sequence
+
 from onyx.llm.model_request import ChatCompletionMessage
 from onyx.llm.prompt_cache.models import CacheMetadata
 from onyx.llm.prompt_cache.providers.base import PromptCacheProvider
@@ -19,6 +21,8 @@ class OpenAIPromptCacheProvider(PromptCacheProvider):
         suffix: list[ChatCompletionMessage],
         continuation: bool,
         cache_metadata: CacheMetadata | None,  # noqa: ARG002
+        boundary_indices: Sequence[int] = (),  # noqa: ARG002
+        mark_tail: bool = True,  # noqa: ARG002
     ) -> list[ChatCompletionMessage]:
         """Prepare messages for OpenAI caching.
 

@@ -1293,3 +1293,106 @@ class TestFinishReasonPropagation:
         result = self._run_stream([("Hello", None), (" world", "stop")])
         assert result.finish_reason == "stop"
         assert result.answer == "Hello world"
+
+
+def _history_message(
+    text: str, message_type: MessageType, cache_boundary: bool = False
+) -> ChatMessageSimple:
+    return ChatMessageSimple(
+        message=text,
+        token_count=5,
+        message_type=message_type,
+        should_cache=True,
+        cache_boundary=cache_boundary,
+    )
+
+
+@pytest.mark.parametrize(
+    ("history", "offers_tools", "expected_boundaries", "expected_mark_tail"),
+    [
+        # First turn, no tools: one-shot prompt, nothing re-reads the tail.
+        (
+            [
+                _history_message("system", MessageType.SYSTEM),
+                _history_message("question", MessageType.USER),
+            ],
+            False,
+            [],
+            False,
+        ),
+        # First turn with tools: the loop re-sends the prefix after a call.
+        (
+            [
+                _history_message("system", MessageType.SYSTEM),
+                _history_message("question", MessageType.USER),
+            ],
+            True,
+            [],
+            True,
+        ),
+        # Later turn: boundary on the last kept history message; the tail
+        # stays marked even without tools.
+        (
+            [
+                _history_message("system", MessageType.SYSTEM),
+                _history_message("old question", MessageType.USER),
+                _history_message("old answer", MessageType.ASSISTANT, True),
+                _history_message("question", MessageType.USER),
+            ],
+            False,
+            [2],
+            True,
+        ),
+    ],
+)
+def test_translate_history_passes_breakpoint_hints(
+    monkeypatch: pytest.MonkeyPatch,
+    history: list[ChatMessageSimple],
+    offers_tools: bool,
+    expected_boundaries: list[int],
+    expected_mark_tail: bool,
+) -> None:
+    monkeypatch.setattr(llm_step_module, "PROMPT_CACHE_CHAT_HISTORY", True)
+    captured: dict[str, Any] = {}
+
+    def _fake_process(**kw: Any) -> tuple[list[Any], None]:
+        captured.update(kw)
+        return kw["cacheable_prefix"] + kw["suffix"], None
+
+    monkeypatch.setattr(llm_step_module, "process_with_prompt_cache", _fake_process)
+
+    translate_history_to_llm_format(
+        history,
+        _make_llm_config(LlmProviderNames.ANTHROPIC),
+        offers_tools=offers_tools,
+    )
+
+    assert captured["boundary_indices"] == expected_boundaries
+    assert captured["mark_tail"] is expected_mark_tail
+
+
+def test_boundary_outside_cacheable_prefix_is_ignored(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(llm_step_module, "PROMPT_CACHE_CHAT_HISTORY", True)
+    captured: dict[str, Any] = {}
+
+    def _fake_process(**kw: Any) -> tuple[list[Any], None]:
+        captured.update(kw)
+        return kw["cacheable_prefix"] + kw["suffix"], None
+
+    monkeypatch.setattr(llm_step_module, "process_with_prompt_cache", _fake_process)
+    uncached_boundary = _history_message("old answer", MessageType.ASSISTANT, True)
+    uncached_boundary.should_cache = False
+    history = [
+        _history_message("system", MessageType.SYSTEM),
+        uncached_boundary,
+        _history_message("question", MessageType.USER),
+    ]
+
+    translate_history_to_llm_format(
+        history, _make_llm_config(LlmProviderNames.ANTHROPIC), offers_tools=False
+    )
+
+    assert captured["boundary_indices"] == []
+    assert captured["mark_tail"] is False

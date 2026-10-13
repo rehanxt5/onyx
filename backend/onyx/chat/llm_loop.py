@@ -466,6 +466,7 @@ def construct_message_history(
         msg_tokens = _replay_token_count(msg)
         if current_token_count + msg_tokens <= remaining_budget:
             msg.should_cache = True
+            msg.cache_boundary = False
             truncated_history_before.insert(0, msg)
             current_token_count += msg_tokens
         else:
@@ -531,6 +532,9 @@ def construct_message_history(
                     forgotten_files_message = _create_file_tool_metadata_message(
                         forgotten_meta, token_counter, available_tool_names
                     )
+
+    if truncated_history_before:
+        truncated_history_before[-1].cache_boundary = True
 
     # Build the final message list according to README ordering:
     # [system], [history_before_last_user], [custom_agent], [context_files],

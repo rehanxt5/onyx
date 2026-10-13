@@ -207,6 +207,9 @@ class ChatMessageSimple(BaseModel):
     # represents the end of the cacheable prefix
     # used for prompt caching
     should_cache: bool = False
+    # Last kept message of the prior-turn history: the stable prefix
+    # [system, history] ends here and is byte-identical on the next turn.
+    cache_boundary: bool = False
     # When this message represents an injected text file, this is the file's ID.
     # Used to detect which file messages survive context-window truncation.
     file_id: str | None = None

@@ -1,5 +1,6 @@
 """Main processor for prompt caching."""
 
+from collections.abc import Sequence
 from datetime import datetime, timezone
 
 from onyx.configs.model_configs import ENABLE_PROMPT_CACHING
@@ -23,6 +24,8 @@ def process_with_prompt_cache(
     suffix: list[ChatCompletionMessage],
     continuation: bool = False,
     with_metadata: bool = True,
+    boundary_indices: Sequence[int] = (),
+    mark_tail: bool = True,
 ) -> tuple[list[ChatCompletionMessage], CacheMetadata | None]:
     """Process prompt with caching support.
 
@@ -39,6 +42,12 @@ def process_with_prompt_cache(
         with_metadata: When False, skip building CacheMetadata — which requires
             SHA256-hashing the entire cacheable prefix, real CPU on large agent
             prompts.
+        boundary_indices: Prefix indices that end a stable sub-prefix (the
+            last kept history message); explicit-cache providers add a
+            breakpoint there
+        mark_tail: Whether the end of the prefix gets a breakpoint. False for
+            a one-shot prompt nothing will re-read, so it is not written to
+            the cache at the higher cache-write rate
 
     Returns:
         Tuple of (processed_prompt, cache_metadata_to_store)
@@ -99,6 +108,8 @@ def process_with_prompt_cache(
             suffix=suffix,
             continuation=continuation,
             cache_metadata=cache_metadata,
+            boundary_indices=boundary_indices,
+            mark_tail=mark_tail,
         )
 
         if not with_metadata:

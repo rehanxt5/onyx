@@ -365,6 +365,57 @@ class TestConstructMessageHistory:
         assert not dropped_user.should_cache
         assert all(msg.should_cache for msg in result)
 
+    def test_cache_boundary_marks_last_kept_history_message(self) -> None:
+        """The history boundary sits on the last kept prior-turn message,
+        never on the current turn, and moves when truncation drops history."""
+        system_prompt = create_message("System", MessageType.SYSTEM, 10)
+        old_user = create_message("Previous turn", MessageType.USER, 5)
+        old_answer = create_message("Previous answer", MessageType.ASSISTANT, 5)
+        user_msg = create_message("Latest question", MessageType.USER, 5)
+        old_answer.cache_boundary = True  # stale flag from an earlier iteration
+
+        result = construct_message_history(
+            system_prompt=system_prompt,
+            custom_agent_prompt=None,
+            simple_chat_history=[old_user, old_answer, user_msg],
+            reminder_message=None,
+            context_files=create_context_files(),
+            available_tokens=1000,
+        )
+
+        assert [msg.cache_boundary for msg in result] == [False, False, True, False]
+
+        # Tighten the budget so the whole prior turn is dropped: no boundary.
+        result = construct_message_history(
+            system_prompt=system_prompt,
+            custom_agent_prompt=None,
+            simple_chat_history=[old_user, old_answer, user_msg],
+            reminder_message=None,
+            context_files=create_context_files(),
+            available_tokens=16,
+        )
+
+        assert [msg.message_type for msg in result] == [
+            MessageType.SYSTEM,
+            MessageType.USER,
+        ]
+        assert not any(msg.cache_boundary for msg in result)
+
+    def test_cache_boundary_absent_on_first_turn(self) -> None:
+        system_prompt = create_message("System", MessageType.SYSTEM, 10)
+        user_msg = create_message("First question", MessageType.USER, 5)
+
+        result = construct_message_history(
+            system_prompt=system_prompt,
+            custom_agent_prompt=None,
+            simple_chat_history=[user_msg],
+            reminder_message=None,
+            context_files=create_context_files(),
+            available_tokens=1000,
+        )
+
+        assert not any(msg.cache_boundary for msg in result)
+
     def test_construct_message_history_does_not_duplicate_project_images(
         self,
     ) -> None:
