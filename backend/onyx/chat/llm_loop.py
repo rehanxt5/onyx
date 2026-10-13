@@ -465,9 +465,11 @@ def construct_message_history(
     for msg in reversed(history_before_last_user):
         msg_tokens = _replay_token_count(msg)
         if current_token_count + msg_tokens <= remaining_budget:
-            msg.should_cache = True
-            msg.cache_boundary = False
-            truncated_history_before.insert(0, msg)
+            # Copy: concurrent model workers share these message objects.
+            truncated_history_before.insert(
+                0,
+                msg.model_copy(update={"should_cache": True, "cache_boundary": False}),
+            )
             current_token_count += msg_tokens
         else:
             # Can't fit this message, stop truncating.

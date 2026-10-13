@@ -121,6 +121,12 @@ def create_context_files(
     )
 
 
+def _same_message(actual: ChatMessageSimple, expected: ChatMessageSimple) -> bool:
+    """Kept history messages are copies, so compare content, not cache flags."""
+    exclude = {"should_cache", "cache_boundary"}
+    return actual.model_dump(exclude=exclude) == expected.model_dump(exclude=exclude)
+
+
 class TestConstructMessageHistory:
     """Tests for the construct_message_history function."""
 
@@ -147,10 +153,10 @@ class TestConstructMessageHistory:
 
         # Should have: system, user1, assistant1, user2
         assert len(result) == 4
-        assert result[0] == system_prompt
-        assert result[1] == user_msg1
-        assert result[2] == assistant_msg1
-        assert result[3] == user_msg2
+        assert _same_message(result[0], system_prompt)
+        assert _same_message(result[1], user_msg1)
+        assert _same_message(result[2], assistant_msg1)
+        assert _same_message(result[3], user_msg2)
 
     def test_with_custom_agent_prompt(self) -> None:
         """Test that custom agent prompt is inserted before the last user message."""
@@ -174,11 +180,11 @@ class TestConstructMessageHistory:
 
         # Should have: system, user1, assistant1, custom_agent, user2
         assert len(result) == 5
-        assert result[0] == system_prompt
-        assert result[1] == user_msg1
-        assert result[2] == assistant_msg1
-        assert result[3] == custom_agent  # Before last user message
-        assert result[4] == user_msg2
+        assert _same_message(result[0], system_prompt)
+        assert _same_message(result[1], user_msg1)
+        assert _same_message(result[2], assistant_msg1)
+        assert _same_message(result[3], custom_agent)  # Before last user message
+        assert _same_message(result[4], user_msg2)
 
     def test_with_context_files(self) -> None:
         """Test that project files are inserted before the last user message."""
@@ -200,13 +206,13 @@ class TestConstructMessageHistory:
 
         # Should have: system, user1, context_files_message, user2
         assert len(result) == 4
-        assert result[0] == system_prompt
-        assert result[1] == user_msg1
+        assert _same_message(result[0], system_prompt)
+        assert _same_message(result[1], user_msg1)
         assert (
             result[2].message_type == MessageType.USER
         )  # Project files as user message
         assert "documents" in result[2].message  # Should contain JSON structure
-        assert result[3] == user_msg2
+        assert _same_message(result[3], user_msg2)
 
     def test_with_reminder_message(self) -> None:
         """Test that reminder message is added at the very end."""
@@ -228,9 +234,9 @@ class TestConstructMessageHistory:
 
         # Should have: system, user, reminder
         assert len(result) == 3
-        assert result[0] == system_prompt
-        assert result[1] == user_msg
-        assert result[2] == reminder  # At the end
+        assert _same_message(result[0], system_prompt)
+        assert _same_message(result[1], user_msg)
+        assert _same_message(result[2], reminder)  # At the end
 
     def test_tool_calls_after_last_user_message(self) -> None:
         """Test that tool calls and responses after last user message are preserved."""
@@ -261,12 +267,12 @@ class TestConstructMessageHistory:
 
         # Should have: system, user1, assistant1, user2, assistant_with_tool, tool_response
         assert len(result) == 6
-        assert result[0] == system_prompt
-        assert result[1] == user_msg1
-        assert result[2] == assistant_msg1
-        assert result[3] == user_msg2
-        assert result[4] == assistant_with_tool
-        assert result[5] == tool_response
+        assert _same_message(result[0], system_prompt)
+        assert _same_message(result[1], user_msg1)
+        assert _same_message(result[2], assistant_msg1)
+        assert _same_message(result[3], user_msg2)
+        assert _same_message(result[4], assistant_with_tool)
+        assert _same_message(result[5], tool_response)
 
     def test_custom_agent_and_project_before_last_user_with_tools_after(self) -> None:
         """Test correct ordering with custom agent, project files, and tool calls."""
@@ -290,13 +296,13 @@ class TestConstructMessageHistory:
 
         # Should have: system, user1, custom_agent, context_files, user2, assistant_with_tool
         assert len(result) == 6
-        assert result[0] == system_prompt
-        assert result[1] == user_msg1
-        assert result[2] == custom_agent  # Before last user message
+        assert _same_message(result[0], system_prompt)
+        assert _same_message(result[1], user_msg1)
+        assert _same_message(result[2], custom_agent)  # Before last user message
         assert result[3].message_type == MessageType.USER  # Project files
         assert "documents" in result[3].message
-        assert result[4] == user_msg2  # Last user message
-        assert result[5] == assistant_with_tool  # After last user message
+        assert _same_message(result[4], user_msg2)  # Last user message
+        assert _same_message(result[5], assistant_with_tool)  # After last user message
 
     def test_cacheable_flags_cover_stable_prefix(self) -> None:
         """System, kept history, custom agent, project files, last user
@@ -364,6 +370,38 @@ class TestConstructMessageHistory:
         assert dropped_user not in result
         assert not dropped_user.should_cache
         assert all(msg.should_cache for msg in result)
+
+    def test_cache_flags_do_not_leak_between_concurrent_histories(self) -> None:
+        """Multi-model workers share ChatMessageSimple objects. Each call must
+        flag its own copies so one worker cannot erase another's boundary."""
+        system_prompt = create_message("System", MessageType.SYSTEM, 10)
+        oldest = create_message("Oldest", MessageType.USER, 5)
+        old_answer = create_message("Old answer", MessageType.ASSISTANT, 5)
+        user_msg = create_message("Latest question", MessageType.USER, 5)
+        history = [oldest, old_answer, user_msg]
+
+        wide = construct_message_history(
+            system_prompt=system_prompt,
+            custom_agent_prompt=None,
+            simple_chat_history=list(history),
+            reminder_message=None,
+            context_files=create_context_files(),
+            available_tokens=1000,
+        )
+        # Budget that keeps only the answer, so the boundary moves.
+        narrow = construct_message_history(
+            system_prompt=system_prompt,
+            custom_agent_prompt=None,
+            simple_chat_history=list(history),
+            reminder_message=None,
+            context_files=create_context_files(),
+            available_tokens=22,
+        )
+
+        assert [msg.cache_boundary for msg in wide] == [False, False, True, False]
+        assert [msg.cache_boundary for msg in narrow] == [False, True, False]
+        assert not oldest.cache_boundary and not oldest.should_cache
+        assert not old_answer.cache_boundary and not old_answer.should_cache
 
     def test_cache_boundary_marks_last_kept_history_message(self) -> None:
         """The history boundary sits on the last kept prior-turn message,
@@ -498,10 +536,10 @@ class TestConstructMessageHistory:
         # Should have: system, user2, assistant2, user3
         # user1 and assistant1 should be truncated
         assert len(result) == 4
-        assert result[0] == system_prompt
-        assert result[1] == user_msg2  # user1 truncated
-        assert result[2] == assistant_msg2
-        assert result[3] == user_msg3
+        assert _same_message(result[0], system_prompt)
+        assert _same_message(result[1], user_msg2)  # user1 truncated
+        assert _same_message(result[2], assistant_msg2)
+        assert _same_message(result[3], user_msg3)
 
     def test_truncation_preserves_last_user_and_messages_after(self) -> None:
         """Test that truncation preserves the last user message and everything after it."""
@@ -528,10 +566,10 @@ class TestConstructMessageHistory:
         # Should have: system, user2, assistant_with_tool, tool_response
         # user1 should be truncated, but user2 and everything after preserved
         assert len(result) == 4
-        assert result[0] == system_prompt
-        assert result[1] == user_msg2  # user1 truncated
-        assert result[2] == assistant_with_tool
-        assert result[3] == tool_response
+        assert _same_message(result[0], system_prompt)
+        assert _same_message(result[1], user_msg2)  # user1 truncated
+        assert _same_message(result[2], assistant_with_tool)
+        assert _same_message(result[3], tool_response)
 
     def test_truncation_drops_orphaned_tool_response(self) -> None:
         """If truncation drops an assistant tool call, its orphaned tool response is removed."""
@@ -565,9 +603,9 @@ class TestConstructMessageHistory:
 
         # Orphaned tool response should be removed from final history.
         assert len(result) == 3
-        assert result[0] == system_prompt
-        assert result[1] == assistant_msg1
-        assert result[2] == user_msg2
+        assert _same_message(result[0], system_prompt)
+        assert _same_message(result[1], assistant_msg1)
+        assert _same_message(result[2], user_msg2)
 
     def test_preserves_non_orphaned_tool_response(self) -> None:
         """Tool responses remain when their assistant tool call is present."""
@@ -592,10 +630,10 @@ class TestConstructMessageHistory:
         )
 
         assert len(result) == 4
-        assert result[0] == system_prompt
-        assert result[1] == assistant_with_tool
-        assert result[2] == tool_response
-        assert result[3] == user_msg2
+        assert _same_message(result[0], system_prompt)
+        assert _same_message(result[1], assistant_with_tool)
+        assert _same_message(result[2], tool_response)
+        assert _same_message(result[3], user_msg2)
 
     def test_empty_history(self) -> None:
         """Test handling of empty chat history."""
@@ -617,10 +655,10 @@ class TestConstructMessageHistory:
 
         # Should have: system, custom_agent, context_files, reminder
         assert len(result) == 4
-        assert result[0] == system_prompt
-        assert result[1] == custom_agent
+        assert _same_message(result[0], system_prompt)
+        assert _same_message(result[1], custom_agent)
         assert result[2].message_type == MessageType.USER  # Project files
-        assert result[3] == reminder
+        assert _same_message(result[3], reminder)
 
     def test_no_user_message_raises_error(self) -> None:
         """Test that an error is raised when there's no user message in history."""
@@ -724,19 +762,19 @@ class TestConstructMessageHistory:
         # system, user1, assistant1, user2, assistant2,
         # custom_agent, context_files, user3, assistant_with_tool, tool_response, reminder
         assert len(result) == 11
-        assert result[0] == system_prompt
-        assert result[1] == user_msg1
-        assert result[2] == assistant_msg1
-        assert result[3] == user_msg2
-        assert result[4] == assistant_msg2
-        assert result[5] == custom_agent  # Before last user
+        assert _same_message(result[0], system_prompt)
+        assert _same_message(result[1], user_msg1)
+        assert _same_message(result[2], assistant_msg1)
+        assert _same_message(result[3], user_msg2)
+        assert _same_message(result[4], assistant_msg2)
+        assert _same_message(result[5], custom_agent)  # Before last user
         assert (
             result[6].message_type == MessageType.USER
         )  # Project files before last user
         assert "documents" in result[6].message
-        assert result[7] == user_msg3  # Last user message
-        assert result[8] == assistant_with_tool  # After last user
-        assert result[9] == tool_response  # After last user
+        assert _same_message(result[7], user_msg3)  # Last user message
+        assert _same_message(result[8], assistant_with_tool)  # After last user
+        assert _same_message(result[9], tool_response)  # After last user
         assert result[10] == reminder  # At the very end
 
     def test_context_files_json_format(self) -> None:
@@ -857,7 +895,7 @@ class TestConstructMessageHistory:
         assert "documents" in result[1].message
         assert "Text file content here" in result[1].message
         # Tool metadata message
-        assert result[2] == user_msg
+        assert _same_message(result[2], user_msg)
         assert "data.xlsx" in result[3].message
         assert not result[3].should_cache
 
@@ -996,16 +1034,14 @@ class TestNonVisionImageBudgeting:
                 token_counter=lambda _: 10,
             )
 
+        history = step.call_args.kwargs["history"]
         if configured_input_limit == 8000:
-            assert step.call_args.kwargs["history"] == [older_answer, image_msg]
+            expected = [older_answer, image_msg]
             assert step.call_args.kwargs["max_tokens"] == 16000
         else:
-            assert step.call_args.kwargs["history"] == [
-                older_user,
-                older_answer,
-                image_msg,
-            ]
+            expected = [older_user, older_answer, image_msg]
             assert step.call_args.kwargs["max_tokens"] == 2780
+        assert all(_same_message(a, e) for a, e in zip(history, expected, strict=True))
         assert (
             count_message_replay_tokens(
                 image_msg,
