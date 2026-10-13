@@ -66,6 +66,7 @@ from onyx.server.query_and_chat.streaming_models import (
     ReasoningStart,
 )
 from onyx.tools.models import ToolCallKickoff
+from onyx.tools.tool_implementations.memory.memory_tool import MemoryTool
 from onyx.tools.tool_name import sanitize_tool_name
 from onyx.tracing.flows import LLMFlow
 from onyx.tracing.framework.create import generation_span
@@ -592,6 +593,20 @@ def _cache_split_stats(
     }
 
 
+def _step_offers_tools(
+    tool_definitions: list[dict], tool_choice: ToolChoiceOptions
+) -> bool:
+    """Whether the step can call a tool that re-sends the prefix. The memory
+    tool is injected into nearly every step and is rarely called on a one-shot
+    question, so a memory-only toolset does not count."""
+    if tool_choice == ToolChoiceOptions.NONE:
+        return False
+    return any(
+        tool_def.get("function", {}).get("name") != MemoryTool.NAME
+        for tool_def in tool_definitions
+    )
+
+
 def translate_history_to_llm_format(
     history: list[ChatMessageSimple],
     llm_config: LLMConfig,
@@ -895,7 +910,7 @@ def run_llm_step_pkt_generator(
         history,
         llm.config,
         image_replay=image_replay,
-        offers_tools=bool(tool_definitions) and tool_choice != ToolChoiceOptions.NONE,
+        offers_tools=_step_offers_tools(tool_definitions, tool_choice),
     )
     has_reasoned = False
 

@@ -29,6 +29,7 @@ from onyx.llm.well_known_providers.constants import (
 from onyx.prompts.chat_prompts import IMAGE_DROP_REMINDER
 from onyx.prompts.constants import SYSTEM_REMINDER_TAG_CLOSE, SYSTEM_REMINDER_TAG_OPEN
 from onyx.server.query_and_chat.placement import Placement
+from onyx.tools.tool_implementations.memory.memory_tool import MemoryTool
 from onyx.utils.postgres_sanitization import sanitize_string
 
 
@@ -1369,6 +1370,31 @@ def test_translate_history_passes_breakpoint_hints(
 
     assert captured["boundary_indices"] == expected_boundaries
     assert captured["mark_tail"] is expected_mark_tail
+
+
+def _tool_def(name: str) -> dict[str, Any]:
+    return {"type": "function", "function": {"name": name, "parameters": {}}}
+
+
+@pytest.mark.parametrize(
+    ("tool_definitions", "tool_choice", "expected"),
+    [
+        ([], ToolChoiceOptions.AUTO, False),
+        ([_tool_def(MemoryTool.NAME)], ToolChoiceOptions.AUTO, False),
+        (
+            [_tool_def(MemoryTool.NAME), _tool_def("internal_search")],
+            ToolChoiceOptions.AUTO,
+            True,
+        ),
+        ([_tool_def("internal_search")], ToolChoiceOptions.NONE, False),
+    ],
+)
+def test_step_offers_tools_ignores_memory_only_toolset(
+    tool_definitions: list[dict[str, Any]],
+    tool_choice: ToolChoiceOptions,
+    expected: bool,
+) -> None:
+    assert llm_step_module._step_offers_tools(tool_definitions, tool_choice) is expected
 
 
 def test_boundary_outside_cacheable_prefix_is_ignored(
